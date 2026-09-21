@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/firebase.ts","./src/main.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/livemap.tsx","./src/firebase.ts","./src/main.tsx"],"version":"5.9.3"}
