@@ -401,7 +401,7 @@ function App() {
   const stats = [
     { label: 'Rute aktif', value: routePoints.length.toString().padStart(2, '0'), hint: 'Tour berjalan' },
     { label: 'GPS online', value: `${Math.min(99, Math.max(80, participants.length * 15))}%`, hint: 'Koneksi stabil' },
-    { label: 'Peserta', value: `${participants.length}`, hint: 'Dalam mobil' },
+    { label: 'Peserta', value: `${participants.length}`, hint: 'Motor' },
   ]
 
   const getBatteryLevel = async () => {
