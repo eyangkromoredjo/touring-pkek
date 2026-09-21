@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
+import LiveMap from './LiveMap'
 
 type Participant = {
   id?: string
@@ -8,6 +9,8 @@ type Participant = {
   motorType: string
   gps: string
   locationName: string
+  departureGps?: string
+  departureLocationName?: string
   battery: string
   status: string
 }
@@ -31,9 +34,9 @@ const routePointsCollection = collection(db, 'routePoints')
 const tourSettingsDocument = doc(db, 'tourSettings', 'main')
 
 const initialParticipants: Participant[] = [
-  { name: 'Ayu', motorType: 'Yamaha NMax', gps: '-7.5123, 110.8415', locationName: 'Kawasan Kromoredjo', battery: '92%', status: 'On route' },
-  { name: 'Rizky', motorType: 'Honda PCX', gps: '-7.5191, 110.8468', locationName: 'Pos 2', battery: '84%', status: 'Checking point' },
-  { name: 'Dina', motorType: 'Vario 125', gps: '-7.5249, 110.8554', locationName: 'Checkpoint', battery: '76%', status: 'Delay 3 min' },
+  { name: 'Ayu', motorType: 'Yamaha NMax', gps: '-7.5123, 110.8415', locationName: 'Kawasan Kromoredjo', departureGps: '-7.5123, 110.8415', departureLocationName: 'Kawasan Kromoredjo', battery: '92%', status: 'On route' },
+  { name: 'Rizky', motorType: 'Honda PCX', gps: '-7.5191, 110.8468', locationName: 'Pos 2', departureGps: '-7.5191, 110.8468', departureLocationName: 'Kawasan Kromoredjo', battery: '84%', status: 'Checking point' },
+  { name: 'Dina', motorType: 'Vario 125', gps: '-7.5249, 110.8554', locationName: 'Checkpoint', departureGps: '-7.5249, 110.8554', departureLocationName: 'Kawasan Kromoredjo', battery: '76%', status: 'Delay 3 min' },
 ]
 
 const initialRoutePoints: RoutePoint[] = [
@@ -53,11 +56,60 @@ const geocodeLocation = async (query: string) => {
   const trimmed = query.trim()
   if (!trimmed) return null
 
+  const normalized = trimmed.replace(/\s*@\s*/g, ' ').replace(/\s+/g, ' ')
+  const normalizedKey = normalized.toLowerCase()
+
+  if (normalizedKey.includes('reddoorz resort') && normalizedKey.includes('tridaya') && normalizedKey.includes('cisarua')) {
+    return {
+      lat: '-6.6695627',
+      lng: '106.9292697',
+      name: 'RedDoorz Resort @ Tridaya Cisarua Puncak',
+    }
+  }
+
+  const queries = Array.from(new Set([
+    trimmed,
+    normalized,
+    `${normalized}, Cisarua, Puncak, Indonesia`,
+    `${normalized}, Bogor, Jawa Barat, Indonesia`,
+  ]))
+
+  for (const searchQuery of queries) {
+    try {
+      const url = new URL('https://nominatim.openstreetmap.org/search')
+      url.searchParams.set('q', searchQuery)
+      url.searchParams.set('format', 'jsonv2')
+      url.searchParams.set('limit', '5')
+      url.searchParams.set('countrycodes', 'id')
+      url.searchParams.set('accept-language', 'id')
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+
+      if (!response.ok) continue
+
+      const data = (await response.json()) as Array<{ lat: string; lon: string; display_name?: string }>
+      const first = data[0]
+
+      if (first) {
+        return {
+          lat: first.lat,
+          lng: first.lon,
+          name: first.display_name ?? trimmed,
+        }
+      }
+    } catch {
+      // Try the next query variation when this request cannot be resolved.
+    }
+  }
+
   try {
-    const url = new URL('https://nominatim.openstreetmap.org/search')
-    url.searchParams.set('q', trimmed)
-    url.searchParams.set('format', 'jsonv2')
-    url.searchParams.set('limit', '1')
+    const url = new URL('https://photon.komoot.io/api/')
+    url.searchParams.set('q', normalized)
+    url.searchParams.set('limit', '5')
 
     const response = await fetch(url.toString(), {
       headers: {
@@ -65,23 +117,33 @@ const geocodeLocation = async (query: string) => {
       },
     })
 
-    if (!response.ok) {
-      throw new Error('Geocoding failed')
-    }
+    if (response.ok) {
+        const data = (await response.json()) as {
+          features?: Array<{
+            geometry?: { coordinates?: [number, number] }
+            properties?: { name?: string; city?: string; country?: string }
+          }>
+        }
+        const first = data.features?.[0]
+      const coordinates = first?.geometry?.coordinates
 
-    const data = (await response.json()) as Array<{ lat: string; lon: string; display_name?: string }>
-    const first = data[0]
+      if (coordinates && Number.isFinite(coordinates[0]) && Number.isFinite(coordinates[1])) {
+        const locationLabel = [first.properties?.name, first.properties?.city, first.properties?.country]
+          .filter(Boolean)
+          .join(', ')
 
-    if (!first) return null
-
-    return {
-      lat: first.lat,
-      lng: first.lon,
-      name: first.display_name ?? trimmed,
+        return {
+          lat: String(coordinates[1]),
+          lng: String(coordinates[0]),
+          name: locationLabel || trimmed,
+        }
+      }
     }
   } catch {
-    return null
+    // The UI will show the not-found message when both public geocoders fail.
   }
+
+  return null
 }
 
 const navItems = [
@@ -191,21 +253,32 @@ function App() {
     const browserNavigator = navigator as Navigator & {
       battery?: { level?: number }
       webkitBattery?: { level?: number }
+      getBattery?: () => Promise<{ level?: number }>
     }
 
-    const battery = browserNavigator.battery ?? browserNavigator.webkitBattery
+    const battery = browserNavigator.battery
+      ?? browserNavigator.webkitBattery
+      ?? (browserNavigator.getBattery ? await browserNavigator.getBattery() : null)
 
     if (!battery) {
-      return '100%'
+      return 'Tidak tersedia'
     }
 
-    const level = Math.round((battery.level ?? 1) * 100)
+    if (typeof battery.level !== 'number') {
+      return 'Tidak tersedia'
+    }
+
+    const level = Math.round(battery.level * 100)
     return `${level}%`
   }
 
   const getCurrentLocation = async () => {
     if (!navigator.geolocation) {
       return { gps: '', locationName: 'Lokasi tidak tersedia' }
+    }
+
+    if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+      return { gps: '', locationName: 'GPS membutuhkan koneksi HTTPS' }
     }
 
     return new Promise<{ gps: string; locationName: string }>((resolve) => {
@@ -220,8 +293,13 @@ function App() {
             locationName: geoResult?.name ?? 'Lokasi saat ini',
           })
         },
-        () => {
-          resolve({ gps: '', locationName: 'Lokasi tidak tersedia' })
+        (error) => {
+          const message = error.code === error.PERMISSION_DENIED
+            ? 'Izin lokasi ditolak'
+            : error.code === error.TIMEOUT
+              ? 'Lokasi belum ditemukan'
+              : 'Lokasi tidak tersedia'
+          resolve({ gps: '', locationName: message })
         },
         { enableHighAccuracy: true, timeout: 10000 }
       )
@@ -244,6 +322,8 @@ function App() {
       motorType,
       gps: currentLocation.gps || 'Tidak tersedia',
       locationName: currentLocation.locationName || 'Lokasi saat ini',
+      departureGps: currentLocation.gps || 'Tidak tersedia',
+      departureLocationName: currentLocation.locationName || 'Lokasi awal tidak tersedia',
       battery,
       status: 'On route',
     })
@@ -611,6 +691,9 @@ function App() {
                     </div>
 
                     <div className="mt-4 space-y-2 text-sm text-slate-300">
+                      <p className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-amber-100">
+                        Titik awal: {person.departureLocationName ?? 'Belum tersimpan'}
+                      </p>
                       <p>Lokasi: {person.locationName}</p>
                       <p>GPS: {person.gps}</p>
                       <p>Baterai: {person.battery}</p>
