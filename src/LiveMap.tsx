@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
 import { divIcon } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -65,6 +65,17 @@ const getDestinationIcon = () => divIcon({
   popupAnchor: [0, -10],
 })
 
+const getParticipantIcon = (name: string) => {
+  const color = getParticipantColor(name)
+  return divIcon({
+    className: 'map-participant-icon',
+    html: `<span style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:${color.fill};border:3px solid ${color.border};color:#0f172a;font-size:10px;font-weight:800;box-shadow:0 2px 5px rgba(15,23,42,.7);">${name.slice(0, 1).toUpperCase()}</span>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
+  })
+}
+
 const parseCoordinatePair = (value: string) => {
   const [lat, lng] = value.split(',').map(Number)
   return Number.isFinite(lat) && Number.isFinite(lng) ? ([lat, lng] as Coordinate) : null
@@ -89,7 +100,7 @@ export default function LiveMap({ participants, routePoints, destination }: Live
     .map((point) => parseCoordinatePair(`${point.lat},${point.lng}`))
     .filter((point): point is Coordinate => point !== null)
   const participantCoordinates = participants
-    .map((participant) => parseCoordinatePair(participant.gps))
+    .map((participant) => parseCoordinatePair(participant.gps) ?? parseCoordinatePair(participant.departureGps ?? ''))
     .filter((point): point is Coordinate => point !== null)
   const departureCoordinates = participants
     .map((participant) => parseCoordinatePair(participant.departureGps ?? ''))
@@ -143,20 +154,21 @@ export default function LiveMap({ participants, routePoints, destination }: Live
         })}
 
         {participants.map((participant, index) => {
-          const coordinate = parseCoordinatePair(participant.gps)
+          const currentCoordinate = parseCoordinatePair(participant.gps)
+          const coordinate = currentCoordinate ?? parseCoordinatePair(participant.departureGps ?? '')
           if (!coordinate) return null
-          const color = getParticipantColor(participant.name)
 
           return (
-            <CircleMarker key={`${participant.name}-${index}`} center={coordinate} radius={8} pathOptions={{ color: color.border, fillColor: color.fill, fillOpacity: 1, weight: 3 }}>
-              <Popup>{participant.name} · {participant.locationName} · {participant.battery}</Popup>
-            </CircleMarker>
+            <Marker key={`${participant.name}-${index}`} position={coordinate} icon={getParticipantIcon(participant.name)}>
+              <Popup>{participant.name} · {currentCoordinate ? participant.locationName : `Titik awal: ${participant.departureLocationName ?? 'Alamat awal'}`} · {participant.battery}</Popup>
+            </Marker>
           )
         })}
 
         {participants.map((participant, index) => {
+          const currentCoordinate = parseCoordinatePair(participant.gps)
           const coordinate = parseCoordinatePair(participant.departureGps ?? '')
-          if (!coordinate) return null
+          if (!coordinate || !currentCoordinate) return null
 
           return (
             <Marker key={`${participant.name}-departure-${index}`} position={coordinate} icon={getLocationIcon('#f59e0b')}>

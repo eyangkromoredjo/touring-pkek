@@ -490,6 +490,17 @@ function App() {
                   </div>
                 ))}
               </section>
+
+              <section className="rounded-[28px] border border-white/10 bg-slate-900/75 p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-bold">Live Map</h3>
+                    <p className="mt-1 text-xs text-slate-400">Pantau anggota, checkpoint, titik awal, dan tujuan secara realtime.</p>
+                  </div>
+                  <StatusBadge value="On route" />
+                </div>
+                <LiveMap participants={participants} routePoints={routePoints} destination={destination} />
+              </section>
             </>
           )}
 
@@ -628,22 +639,8 @@ function App() {
 
               <div className="rounded-[28px] border border-white/10 bg-slate-900/75 p-5">
                 <h3 className="text-xl font-bold">Peta real-time</h3>
-                <div className="mt-4 h-80 rounded-2xl border border-dashed border-cyan-400/30 bg-[radial-gradient(circle_at_center,_rgba(34,211,238,0.15),_transparent_35%),linear-gradient(135deg,#020617,#111827)] p-4">
-                  <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/5 bg-slate-950/50">
-                    {routePoints.map((point, index) => (
-                      <div
-                        key={`${point.name}-dot-${index}`}
-                        className="absolute h-3 w-3 rounded-full bg-cyan-400 shadow-[0_0_18px_rgba(34,211,238,0.9)]"
-                        style={{
-                          left: `${12 + index * 18}%`,
-                          top: `${18 + (index % 3) * 22}%`,
-                        }}
-                      />
-                    ))}
-                    <svg viewBox="0 0 300 220" className="h-full w-full opacity-70">
-                      <path d="M20 160 C90 120, 120 100, 170 130 S250 140, 290 80" fill="none" stroke="rgba(34,211,238,0.6)" strokeWidth="4" strokeDasharray="8 8" />
-                    </svg>
-                  </div>
+                <div className="mt-4">
+                  <LiveMap participants={participants} routePoints={routePoints} destination={destination} />
                 </div>
               </div>
             </section>
