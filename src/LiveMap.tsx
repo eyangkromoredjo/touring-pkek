@@ -14,6 +14,8 @@ type MapParticipant = {
   departureLocationName?: string
   battery: string
   status: string
+  assignedCheckpoint?: string
+  assignedCheckpoints?: string[]
 }
 
 type MapRoutePoint = {
@@ -81,6 +83,16 @@ const parseCoordinatePair = (value: string) => {
   return Number.isFinite(lat) && Number.isFinite(lng) ? ([lat, lng] as Coordinate) : null
 }
 
+const distanceInMeters = (first: Coordinate, second: Coordinate) => {
+  const earthRadius = 6371000
+  const latitudeDifference = (second[0] - first[0]) * Math.PI / 180
+  const longitudeDifference = (second[1] - first[1]) * Math.PI / 180
+  const latitude = first[0] * Math.PI / 180
+  const secondLatitude = second[0] * Math.PI / 180
+  const value = Math.sin(latitudeDifference / 2) ** 2 + Math.cos(latitude) * Math.cos(secondLatitude) * Math.sin(longitudeDifference / 2) ** 2
+  return earthRadius * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value))
+}
+
 function FitMapBounds({ points }: { points: Coordinate[] }) {
   const map = useMap()
 
@@ -106,6 +118,21 @@ export default function LiveMap({ participants, routePoints, destination }: Live
     .map((participant) => parseCoordinatePair(participant.departureGps ?? ''))
     .filter((point): point is Coordinate => point !== null)
   const destinationCoordinate = parseCoordinatePair(`${destination.lat},${destination.lng}`)
+  const checkpointCoordinates = new Map(
+    routePoints.map((point) => [point.name, parseCoordinatePair(`${point.lat},${point.lng}`)]),
+  )
+  const participantCheckpointPaths = participants.flatMap((participant) => {
+    const start = parseCoordinatePair(participant.gps) ?? parseCoordinatePair(participant.departureGps ?? '')
+    if (!start) return []
+
+    const checkpointName = participant.assignedCheckpoint ?? participant.assignedCheckpoints?.[0]
+
+    return checkpointName ? (() => {
+      const checkpoint = checkpointCoordinates.get(checkpointName)
+      return checkpoint ? [{ participant, positions: [start, checkpoint] as Coordinate[] }] : []
+    })() : []
+  })
+  const finalRouteStart = routeCoordinates[routeCoordinates.length - 1]
   const allCoordinates = [
     ...routeCoordinates,
     ...participantCoordinates,
@@ -113,6 +140,19 @@ export default function LiveMap({ participants, routePoints, destination }: Live
     ...(destinationCoordinate ? [destinationCoordinate] : []),
   ]
   const defaultCenter: Coordinate = destinationCoordinate ?? routeCoordinates[0] ?? [-7.52, 110.85]
+
+  const getArrivedParticipantNames = (point: MapRoutePoint) => {
+    const pointCoordinate = parseCoordinatePair(`${point.lat},${point.lng}`)
+    if (!pointCoordinate) return []
+
+    return participants
+      .filter((participant) => participant.assignedCheckpoint === point.name || participant.assignedCheckpoints?.[0] === point.name)
+      .filter((participant) => {
+        const participantCoordinate = parseCoordinatePair(participant.gps)
+        return participantCoordinate && distanceInMeters(pointCoordinate, participantCoordinate) <= 100
+      })
+      .map((participant) => participant.name)
+  }
 
   return (
     <div className="overflow-hidden rounded-2xl border border-cyan-400/30">
@@ -130,6 +170,8 @@ export default function LiveMap({ participants, routePoints, destination }: Live
         })}
         <span className="inline-flex items-center gap-1.5"><span className="h-0 w-0 border-x-[5px] border-b-[9px] border-x-transparent border-b-amber-500" />Lokasi / titik awal</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rotate-45 border-2 border-violet-700 bg-violet-400" />Tujuan</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 border-t-2 border-dashed border-slate-700" />Jalur ke checkpoint</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 border-t-2 border-dotted border-violet-700" />Jalur tujuan akhir</span>
       </div>
       <MapContainer center={defaultCenter} zoom={13} scrollWheelZoom className="h-80 w-full">
         <TileLayer
@@ -142,13 +184,37 @@ export default function LiveMap({ participants, routePoints, destination }: Live
           <Polyline positions={routeCoordinates} pathOptions={{ color: '#0891b2', weight: 5, opacity: 0.85 }} />
         )}
 
+        {participantCheckpointPaths.map(({ participant, positions }, index) => {
+          const color = getParticipantColor(participant.name)
+
+          return (
+            <Polyline
+              key={`${participant.name}-checkpoint-path-${index}`}
+              positions={positions}
+              pathOptions={{ color: color.border, weight: 3, opacity: 0.8, dashArray: '6 8' }}
+            />
+          )
+        })}
+
+        {destinationCoordinate && finalRouteStart && (
+          <Polyline
+            positions={[finalRouteStart, destinationCoordinate]}
+            pathOptions={{ color: '#7c3aed', weight: 5, opacity: 0.9, dashArray: '2 7' }}
+          />
+        )}
+
         {routePoints.map((point, index) => {
           const coordinate = parseCoordinatePair(`${point.lat},${point.lng}`)
           if (!coordinate) return null
 
           return (
             <Marker key={`${point.name}-${index}`} position={coordinate} icon={getLocationIcon('#f59e0b')}>
-              <Popup>{point.name} · {point.status}</Popup>
+              <Popup>
+                <strong>{point.name}</strong><br />
+                {getArrivedParticipantNames(point).length > 0 && (
+                  <>Sampai: {getArrivedParticipantNames(point).join(', ')}</>
+                )}
+              </Popup>
             </Marker>
           )
         })}
